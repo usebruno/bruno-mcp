@@ -19,7 +19,7 @@ const hasUnresolvedVariables = (result: any): boolean => {
   return typeof url === 'string' && TEMPLATE_VAR.test(url);
 };
 
-export const registerExecuteRequestTool = (server: McpServer, { registry, verbose }: ToolContext): void => {
+export const registerExecuteRequestTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
     'execute_request',
     {
@@ -50,7 +50,8 @@ export const registerExecuteRequestTool = (server: McpServer, { registry, verbos
         return textResult(unknownCollectionMessage(registry, collectionPath), true);
       }
 
-      if (!registry.resolveRequestPath(collectionPath, requestPath)) {
+      const resolved = registry.resolveRequestPath(collectionPath, requestPath);
+      if (!resolved) {
         return textResult(
           {
             error: `Request not found: "${requestPath}" in collection "${collection.name}"`,
@@ -71,10 +72,9 @@ export const registerExecuteRequestTool = (server: McpServer, { registry, verbos
       try {
         const result = await executeRequest({
           collectionPath: collection.path,
-          requestPath,
+          requestPath: resolved.path,
           environment,
-          variables,
-          verbose
+          variables
         });
         const needsEnvironment = !result.ok && !environment && hasUnresolvedVariables(result);
         return textResult(

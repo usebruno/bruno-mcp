@@ -1,18 +1,21 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { createServer } from '../server.js';
+import * as log from '../log.js';
 import type { DiscoveryConfig } from '../types.js';
+
+// Redirect console.log/info/debug to console.error to avoid corrupting the JSON-RPC stream.
+export const redirectConsoleLogToStderr = (): void => {
+  console.log = console.info = console.debug = console.error;
+};
 
 interface StartStdioServerArgs {
   config: DiscoveryConfig;
-  verbose?: boolean;
 }
 
-export const startStdioServer = async ({ config, verbose = false }: StartStdioServerArgs): Promise<void> => {
-  const server = createServer({ config, verbose });
+export const startStdioServer = async ({ config }: StartStdioServerArgs): Promise<void> => {
+  const server = createServer({ config });
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  if (verbose) {
-    process.stderr.write('[bruno-mcp] stdio server ready\n');
-  }
+  log.debug('stdio server ready');
 };

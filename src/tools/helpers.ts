@@ -8,7 +8,6 @@ import { collectionsFromWorkspace, isWorkspaceDir } from '../core/discover.js';
 import type { RegisteredCollection } from '../types.js';
 export interface ToolContext {
   registry: CollectionRegistry;
-  verbose: boolean;
 }
 
 export const textResult = (obj: unknown, isError = false): CallToolResult => ({
@@ -64,7 +63,7 @@ export const collectionPathSchema = () =>
         'Get this from list_collections, or use a path the user provides directly.'
     );
 
-// Optional per-run variable overrides, shared by execute_request and run_collection.
+// Optional per-run variable overrides used by the execute_request tool
 export const variablesSchema = () =>
   z
     .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))

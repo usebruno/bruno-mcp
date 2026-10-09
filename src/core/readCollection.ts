@@ -1,9 +1,9 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import yaml from 'js-yaml';
-import { parseFolder, parseRequest } from '@usebruno/filestore';
+import { parseFolder, parseRequest, redactLargeBruTextBlocks } from '@usebruno/filestore';
 
 import type { RequestInfo } from '../types.js';
+import * as log from '../log.js';
 
 export type CollectionFormat = 'bru' | 'yml';
 
@@ -49,18 +49,29 @@ const readFolderSeq = (dir: string, format: CollectionFormat): number | undefine
   }
 };
 
-// folders first (by seq, then name), then requests by seq: mirrors how Bruno lists a collection
-const bySeqThenName = (a: any, b: any): number => {
-  const sa = typeof a.seq === 'number' ? a.seq : Infinity;
-  const sb = typeof b.seq === 'number' ? b.seq : Infinity;
-  return sa !== sb ? sa - sb : String(a.name).localeCompare(String(b.name));
-};
+const hasValidSeq = (seq: unknown): seq is number => Number.isInteger(seq) && (seq as number) > 0;
 
-const REQUEST_TYPES: Record<string, string> = {
-  http: 'http-request',
-  graphql: 'graphql-request',
-  grpc: 'grpc-request',
-  ws: 'ws-request'
+const requestSeq = (request: { seq: number | undefined }): number => (hasValidSeq(request.seq) ? request.seq : Infinity);
+
+// sorts folders by seq, and folders without a seq by name: mirrors how Bruno lists a collection
+const sortByNameThenSequence = <T extends { name: string; seq: number | undefined }>(items: T[]): T[] => {
+  const byName = [...items].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted: (T | T[])[] = byName.filter((item) => !hasValidSeq(item.seq));
+
+  const sequenced = byName.filter((item) => hasValidSeq(item.seq)).sort((a, b) => (a.seq as number) - (b.seq as number));
+  for (const item of sequenced) {
+    const position = (item.seq as number) - 1;
+    const existing = sorted[position];
+    const sharesSeq = Array.isArray(existing) ? existing[0].seq === item.seq : existing?.seq === item.seq;
+
+    if (sharesSeq) {
+      sorted.splice(position, 1, Array.isArray(existing) ? [...existing, item] : [existing, item]);
+    } else {
+      sorted.splice(position, 0, item);
+    }
+  }
+
+  return sorted.flat() as T[];
 };
 
 interface ScannedRequest {
@@ -78,31 +89,26 @@ interface IndexedFolder {
   seq: number | undefined;
 }
 
-/**
- * For quick scanning, we only read the first part of .bru files.
- * This is enough to get the meta block (name, type, seq) and HTTP verb block (method, url)
- * without parsing the potentially large body, scripts, or tests that come later.
- */
-const HEAD_BYTES = 4096;
-
-const readHead = (filePath: string): string => {
-  const fd = fs.openSync(filePath, 'r');
-  try {
-    const buf = Buffer.alloc(HEAD_BYTES);
-    const bytesRead = fs.readSync(fd, buf, 0, HEAD_BYTES, 0);
-    return buf.subarray(0, bytesRead).toString('utf8');
-  } finally {
-    fs.closeSync(fd);
-  }
+const REQUEST_TYPES: Record<string, string> = {
+  http: 'http-request',
+  graphql: 'graphql-request',
+  grpc: 'grpc-request',
+  ws: 'ws-request'
 };
 
-// Regex patterns to extract key info from .bru files
-const BRU_META_BLOCK = /^meta\s*\{([\s\S]*?)^\}/m;           // The meta { ... } block with name, type, seq
-const BRU_VERB_BLOCK = /^(get|post|put|delete|patch|head|options|trace)\s*\{([\s\S]*?)^\}/im;  // HTTP verb block
-const BRU_NAME = /^\s*name:\s*(.*)$/m;   // Request name inside meta block
-const BRU_TYPE = /^\s*type:\s*(.*)$/m;   // Request type (http, graphql, etc.)
-const BRU_SEQ = /^\s*seq:\s*(\d+)\s*$/m; // Sequence number for ordering
-const BRU_URL = /^\s*url:\s*(.*)$/m;     // URL inside verb block
+const META_BLOCK = /^meta[ \t]*\{([\s\S]*?)^\}/m;
+const VERB_BLOCK = /^(get|post|put|delete|patch|head|options|trace|connect)[ \t]*\{([\s\S]*?)^\}/m;
+const HTTP_BLOCK = /^http[ \t]*\{([\s\S]*?)^\}/m;
+const GRPC_BLOCK = /^grpc[ \t]*\{([\s\S]*?)^\}/m;
+const WS_BLOCK = /^ws[ \t]*\{([\s\S]*?)^\}/m;
+
+const FIELD = {
+  name: /^[ \t]*name:[ \t]*(.*)$/m,
+  type: /^[ \t]*type:[ \t]*(.*)$/m,
+  seq: /^[ \t]*seq:[ \t]*(\d+)[ \t]*$/m,
+  url: /^[ \t]*url:[ \t]*(.*)$/m,
+  method: /^[ \t]*method:[ \t]*(.*)$/m
+};
 
 const field = (block: string, pattern: RegExp): string | null => {
   const match = block.match(pattern);
@@ -110,69 +116,97 @@ const field = (block: string, pattern: RegExp): string | null => {
   return value.length > 0 ? value : null;
 };
 
-const scanBruHead = (filePath: string): ScannedRequest | null => {
-  const head = readHead(filePath);
-  const verb = head.match(BRU_VERB_BLOCK);
-  if (!verb) return null;
+const BLOCK_OPEN = /^[A-Za-z][\w:.-]*[ \t]*\{[ \t]*$/gm;
+const BLOCK_CLOSE = /^\}[ \t]*$/gm;
 
-  const meta = head.match(BRU_META_BLOCK);
+// Mismatched counts mean a file which the grammar would reject.
+const bracesBalanced = (skeleton: string): boolean =>
+  (skeleton.match(BLOCK_OPEN) || []).length === (skeleton.match(BLOCK_CLOSE) || []).length;
+
+interface ScannedProtocol {
+  method: string | null;
+  url: string | null;
+}
+
+const protocolOf = (skeleton: string): ScannedProtocol | null => {
+  const verb = skeleton.match(VERB_BLOCK);
+  if (verb) return { method: verb[1].toUpperCase(), url: field(verb[2], FIELD.url) };
+
+  const http = skeleton.match(HTTP_BLOCK);
+  if (http) return { method: field(http[1], FIELD.method)?.toUpperCase() ?? null, url: field(http[1], FIELD.url) };
+
+  // gRPC method paths are case-sensitive, so they are reported exactly as written.
+  const grpc = skeleton.match(GRPC_BLOCK);
+  if (grpc) return { method: field(grpc[1], FIELD.method), url: field(grpc[1], FIELD.url) };
+
+  const ws = skeleton.match(WS_BLOCK);
+  if (ws) return { method: null, url: field(ws[1], FIELD.url) };
+
+  return null;
+};
+
+const scanBruSkeleton = (content: string, filePath: string): ScannedRequest | null => {
+  const { skeleton } = redactLargeBruTextBlocks(content);
+  if (!bracesBalanced(skeleton)) return null;
+
+  const protocol = protocolOf(skeleton);
+  if (!protocol) return null;
+
+  const meta = skeleton.match(META_BLOCK);
   const metaBlock = meta ? meta[1] : '';
-  const seq = field(metaBlock, BRU_SEQ);
+  const seq = field(metaBlock, FIELD.seq);
 
   return {
-    name: field(metaBlock, BRU_NAME) || path.basename(filePath, '.bru'),
-    type: REQUEST_TYPES[field(metaBlock, BRU_TYPE) || ''] || null,
-    seq: seq === null ? undefined : Number(seq),
-    method: verb[1].toUpperCase(),
-    url: field(verb[2], BRU_URL)
+    name: field(metaBlock, FIELD.name) || path.basename(filePath, '.bru'),
+    type: REQUEST_TYPES[field(metaBlock, FIELD.type) || ''] || 'http-request',
+    seq: seq !== null ? Number(seq) : meta ? 1 : undefined,
+    method: protocol.method,
+    url: protocol.url
   };
 };
 
-const scanYmlFile = (filePath: string): ScannedRequest | null => {
-  let doc: any;
-  try {
-    doc = yaml.load(fs.readFileSync(filePath, 'utf8'));
-  } catch (_) {
-    return null;
-  }
-  if (!doc || typeof doc !== 'object') return null;
-
-  const protocol = doc.http || doc.graphql || doc.grpc || doc.ws;
-  if (!protocol || typeof protocol !== 'object') return null;
-
-  const info = doc.info || {};
-  return {
-    name: info.name ? String(info.name) : path.basename(filePath, '.yml'),
-    type: REQUEST_TYPES[String(info.type || '')] || null,
-    seq: typeof info.seq === 'number' ? info.seq : undefined,
-    method: protocol.method != null ? String(protocol.method).toUpperCase() : null,
-    url: protocol.url != null ? String(protocol.url) : null
-  };
+const normalizeMethod = (method: unknown, type: unknown): string | null => {
+  if (typeof method !== 'string' || method.length === 0) return null;
+  return type === 'grpc-request' ? method : method.toUpperCase();
 };
 
-const scanViaParse = (filePath: string, format: CollectionFormat): ScannedRequest | null => {
+const scanViaParse = (content: string, filePath: string, format: CollectionFormat): ScannedRequest | null => {
   try {
-    const parsed = parseRequestFile(filePath, format);
+    const parsed =
+      format === 'bru'
+        ? parseRequest(redactLargeBruTextBlocks(content).skeleton, { format })
+        : parseRequest(content, { format });
     return {
       name: parsed.name || path.basename(filePath, FORMAT_FILES[format].ext),
-      type: parsed.type || null,
-      seq: typeof parsed.seq === 'number' ? parsed.seq : undefined,
-      method: parsed.request?.method || null,
+      type: parsed.type || 'http-request',
+      seq: Number.isFinite(parsed.seq) ? parsed.seq : undefined,
+      method: normalizeMethod(parsed.request?.method, parsed.type),
       url: parsed.request?.url || null
     };
-  } catch (_) {
-    // malformed files are skipped
+  } catch (err: any) {
+    log.warn(`skipping ${filePath}: ${err && err.message ? err.message : err}`);
     return null;
   }
 };
 
 const scanRequest = (filePath: string, format: CollectionFormat): ScannedRequest | null => {
+  let content: string;
   try {
-    return (format === 'bru' ? scanBruHead(filePath) : scanYmlFile(filePath)) ?? scanViaParse(filePath, format);
-  } catch (_) {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch (err: any) {
+    log.warn(`skipping ${filePath}: ${err && err.message ? err.message : err}`);
     return null;
   }
+
+  if (format === 'bru') {
+    const scanned = scanBruSkeleton(content, filePath);
+    if (scanned) return scanned;
+  }
+  return scanViaParse(content, filePath, format);
 };
+
+const toPosixPath = (relativePath: string): string =>
+  path.sep === '/' ? relativePath : relativePath.split(path.sep).join('/');
 
 export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {
   const format = detectFormat(collectionPath);
@@ -201,12 +235,13 @@ export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {
       }
     }
 
-    for (const folder of folders.sort(bySeqThenName)) traverse(folder.pathname);
-    for (const request of requests.sort(bySeqThenName)) {
+    // folders first (by seq, then name), then requests by seq: mirrors how Bruno lists a collection
+    for (const folder of sortByNameThenSequence(folders)) traverse(folder.pathname);
+    for (const request of requests.sort((a, b) => requestSeq(a) - requestSeq(b) || a.name.localeCompare(b.name))) {
       index.push({
         name: request.name,
         pathname: request.pathname,
-        relativePath: path.relative(collectionPath, request.pathname),
+        relativePath: toPosixPath(path.relative(collectionPath, request.pathname)),
         type: request.type,
         method: request.method,
         url: request.url

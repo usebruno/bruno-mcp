@@ -220,12 +220,18 @@ export const discoverCollections = (
   const diagnostics: string[] = [];
   const explicitCollections = config.explicitCollections || [];
   const explicitWorkspaces = config.explicitWorkspaces || [];
+  const scopedExplicitly = explicitCollections.length > 0 || explicitWorkspaces.length > 0;
   let entries: DiscoveredCollection[] = [];
   let source: string | null = null;
+  let scoped = scopedExplicitly;
 
-  if (explicitCollections.length > 0 || explicitWorkspaces.length > 0) {
+  if (scopedExplicitly) {
     const fromExplicit: DiscoveredCollection[] = [];
     for (const c of explicitCollections) {
+      if (!isCollectionDir(c)) {
+        diagnostics.push(`not a bruno collection: ${c}`);
+        continue;
+      }
       fromExplicit.push({ path: c, workspacePath: null, workspaceName: null, nameInWorkspace: null });
     }
     for (const w of explicitWorkspaces) {
@@ -238,9 +244,13 @@ export const discoverCollections = (
   } else if (config.cwdDiscovery) {
     const cwd = process.cwd();
     const { entries: cwdEntries, found } = discoverFromCwd(cwd);
-    if (cwdEntries.length > 0) {
+    if (found) {
+      scoped = true;
+      source = `cwd (${found.marker} at ${found.dir})`;
       entries = dedupeByPath(cwdEntries);
-      source = `cwd (${found!.marker} at ${found!.dir})`;
+      if (entries.length === 0) {
+        diagnostics.push(`no collections found at ${found.marker} at ${found.dir}`);
+      }
     } else {
       diagnostics.push(
         `cwd discovery: no Bruno marker (workspace.yml/bruno.json/opencollection.yml) found walking up from ${cwd}`
@@ -248,7 +258,11 @@ export const discoverCollections = (
     }
   }
 
-  if (entries.length === 0 && config.autoDiscovery) {
+  if (scoped && entries.length === 0) {
+    diagnostics.push('resolved to no collections');
+  }
+
+  if (entries.length === 0 && !scoped && config.autoDiscovery) {
     const { entries: discovered, prefsStatus } = autoDiscoverFromBruno();
     if (discovered.length > 0) {
       entries = discovered;
