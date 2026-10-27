@@ -5,7 +5,10 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import type { CollectionRegistry } from '../core/collections.js';
 import { collectionsFromWorkspace, isWorkspaceDir } from '../core/discover.js';
+import type { EnvironmentFile } from '../core/environments.js';
+import { SCRIPT_TYPES } from '../core/requests.js';
 import type { RegisteredCollection } from '../types.js';
+
 export interface ToolContext {
   registry: CollectionRegistry;
   verbose: boolean;
@@ -72,3 +75,35 @@ export const variablesSchema = () =>
     .describe(
       'Override (or add) environment variables for this run, replacing any values from the environment.'
     );
+
+export const errorText = (err: any): string => (err && err.message ? err.message : String(err));
+
+export const requestNotFoundMessage = (registry: CollectionRegistry, collection: RegisteredCollection, requestPath: string) => ({
+  error: `Request not found: "${requestPath}" in collection "${collection.name}"`,
+  hint: 'Use the exact relative path from list_requests.',
+  availableRequests: (registry.listRequests(collection.path) || []).map((r) => r.relativePath)
+});
+
+export const findEnvironment = (
+  registry: CollectionRegistry,
+  collection: RegisteredCollection,
+  name: string
+): { environment: EnvironmentFile } | { error: CallToolResult } => {
+  const environments = registry.environmentFiles(collection.path);
+  const environment = environments.find((env) => env.name === name);
+  if (environment) return { environment };
+  return {
+    error: textResult(
+      unknownEnvironmentMessage(collection, name, environments.map((env) => env.name), 'Environment names are case-sensitive.'),
+      true
+    )
+  };
+};
+
+export const requestPathSchema = (description = 'Relative path of the request inside the collection, as returned by list_requests (e.g. "users/get-user.bru").') =>
+  z.string().describe(description);
+
+export const scriptTypeSchema = () =>
+  z
+    .enum(SCRIPT_TYPES)
+    .describe('"pre-request" runs before the request is sent, "post-response" after the response arrives, "tests" holds test() blocks.');

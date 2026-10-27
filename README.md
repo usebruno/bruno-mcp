@@ -17,6 +17,16 @@ It exposes your requests, folders, and environments as MCP tools so an agent can
 | `run_collection` | Run a whole collection, or a subset of requests/folders (`requests`), via `bru run`; supports `iterations`, a CSV/JSON `dataFile`, `parallel`, `bail`, and `timeoutSeconds` (default 600). Returns a pass/fail summary and a per-request roll-up (outcome, status, response time, failed assertions/tests); headers and bodies are left out. |
 | `list_environments` | List a collection's environments with their variable count and whether they contain secrets. Read-only. |
 | `get_environment` | Read one environment's variables (name, value, enabled, secret). Secret values come back as `<redacted>`. Read-only. |
+| `list_folders` | The folder tree of a collection with the number of requests under each folder; optional `depth`. Read-only. |
+| `get_collection_stats` | Request counts by method and type, folder count, environment count, and size on disk. Read-only. |
+| `set_environment_variable` | Add or change one variable in an environment file (`value`, optional `enabled`, `secret`). A variable already marked secret needs `overwriteSecret: true`. |
+| `remove_environment_variable` | Delete one variable from an environment file. |
+| `create_collection` | Create an empty collection at `outputPath` (`yml` by default, or `bru`), with an optional `{{baseUrl}}` collection variable and description; `workspacePath` also lists it in a workspace. |
+| `write_request` | Create the request at `requestPath` or edit the one already there: `name`, `method`, `url`, `headers`, `body`, `auth`, `assert`. Pass `requests` to write several at once. |
+| `delete_request` | Delete the request files in `requestPaths`. Requires `confirm: true`. |
+| `move_request` | Move or copy (`copy: true`) a request into another folder or collection, converting between `.bru` and `.yml` when needed. |
+| `add_test_script` | Append to (or `replace`) a request's `pre-request`, `post-response`, or `tests` script. 50 KB per block. |
+| `remove_script` | Clear one of a request's script blocks. |
 
 A collection is addressed by its **path**, not by an id: pass the `path` from `list_collections` as `collectionPath` to the other tools. If you already know where a collection lives, you can pass it directly without listing first. A request is addressed by its `relativePath` within the collection (e.g. `users/get-user.bru`).
 
@@ -34,6 +44,15 @@ Everything else comes back as-is, including **response headers**: a `Set-Cookie`
 `run_collection` leaves headers and bodies out, but failed assertion/test messages, per-request errors, and `diagnostics` carry only the CLI masking above, so an assertion on a response value can echo that value back.
 
 Response bodies are not truncated by this server. Every MCP client applies its own ceiling, so a second cap here would only lose bodies the client would have accepted.
+
+### Writing to collections
+
+The authoring tools write straight to your collection files, with no undo, keep collections in Git to review and revert changes.
+
+- Files are written the way the Bruno app writes them. `.bru` files are rewritten unchanged apart from the edit. A `.yml` request is re-serialized on every edit, which drops YAML comments and fills in Bruno's default `settings`, as saving it in the app does.
+- `.yml` environments and `workspace.yml` are edited in place, so comments and other entries stay as they were.
+- Secret values are never written. Bruno keeps them outside collection files, so `set_environment_variable` writes a secret variable by name only; pass the value in `variables` to `execute_request` or `run_collection` to use it.
+- Every write stays inside the collection: paths that leave it (including through symlinks), the `environments` folder, `.git`, and `node_modules` (in any letter case) are refused. A `write_request` or `delete_request` call that includes one bad path writes or deletes nothing.
 
 ## Setup
 

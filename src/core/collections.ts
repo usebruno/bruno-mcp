@@ -4,7 +4,14 @@ import yaml from 'js-yaml';
 
 import type { DiscoveryConfig, RegisteredCollection, CollectionListItem, RequestInfo } from '../types.js';
 import { collectionsFromWorkspace, discoverCollections, isCollectionDir, isWorkspaceDir } from './discover.js';
-import { detectFormat, isRequestFile, readCollectionIndex, type CollectionFormat } from './readCollection.js';
+import {
+  ENVIRONMENTS_DIR,
+  SKIPPED_DIRS,
+  detectFormat,
+  isRequestFile,
+  readCollectionIndex,
+  type CollectionFormat
+} from './readCollection.js';
 import { listEnvironmentFiles, type EnvironmentFile } from './environments.js';
 
 const collectionNameFromConfig = (collectionPath: string): string => {
@@ -68,6 +75,35 @@ export interface ResolvedRequestFile {
 const isInside = (parent: string, child: string): boolean => {
   const rel = path.relative(parent, child);
   return rel.length > 0 && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
+// Case-insensitive, since macOS and Windows volumes resolve `Environments/` and `.GIT/` to the real folders.
+const isReservedPath = (collectionPath: string, target: string): boolean => {
+  const segments = path.relative(collectionPath, target).toLowerCase().split(path.sep);
+  return segments[0] === ENVIRONMENTS_DIR || segments.some((segment) => SKIPPED_DIRS.has(segment));
+};
+
+const pathExists = (p: string): boolean => {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch (_) {
+    return false;
+  }
+};
+
+// Checks the real path of the deepest part of `child` that exists, so a symlink can't lead out of the collection or into a reserved folder.
+const isInsideOnDisk = (parent: string, child: string): boolean => {
+  let existing = child;
+  while (!pathExists(existing)) existing = path.dirname(existing);
+  try {
+    const realParent = fs.realpathSync.native(parent);
+    const real = fs.realpathSync.native(existing);
+    if (real === realParent) return existing !== child;
+    return isInside(realParent, real) && !isReservedPath(realParent, real);
+  } catch (_) {
+    return false;
+  }
 };
 
 export class CollectionRegistry {
@@ -152,7 +188,8 @@ export class CollectionRegistry {
     return readCollectionIndex(collection.path);
   }
 
-  resolveRequestPath(collectionPath: string, relativePath: string): ResolvedRequestFile | null {
+  // A request file path that may not exist yet: inside the collection, outside `environments`, `.git`, and `node_modules`.
+  resolveRequestTarget(collectionPath: string, relativePath: string): ResolvedRequestFile | null {
     const collection = this.find(collectionPath);
     if (!collection) return null;
 
@@ -160,17 +197,38 @@ export class CollectionRegistry {
     if (!format) return null;
 
     const target = path.resolve(collection.path, relativePath);
-    if (!isInside(collection.path, target)) return null;
+    if (!isInside(collection.path, target) || isReservedPath(collection.path, target)) return null;
     if (!isRequestFile(collection.path, target, format)) return null;
+    if (!isInsideOnDisk(collection.path, target)) return null;
 
+    return { path: target, format };
+  }
+
+  resolveRequestPath(collectionPath: string, relativePath: string): ResolvedRequestFile | null {
+    const resolved = this.resolveRequestTarget(collectionPath, relativePath);
+    if (!resolved) return null;
     try {
-      if (!fs.statSync(target).isFile()) return null;
-      if (!isInside(fs.realpathSync(collection.path), fs.realpathSync(target))) return null;
+      return fs.statSync(resolved.path).isFile() ? resolved : null;
     } catch (_) {
       return null;
     }
+  }
 
-    return { path: target, format };
+  // A folder to put requests in, created on write if missing; "" is the collection root.
+  resolveFolderTarget(collectionPath: string, relativePath: string): string | null {
+    const collection = this.find(collectionPath);
+    if (!collection) return null;
+
+    const target = path.resolve(collection.path, relativePath);
+    if (target === collection.path) return target;
+    if (!isInside(collection.path, target) || isReservedPath(collection.path, target)) return null;
+    if (!isInsideOnDisk(collection.path, target)) return null;
+
+    try {
+      return fs.statSync(target).isDirectory() ? target : null;
+    } catch (_) {
+      return target;
+    }
   }
 
   resolveFolderPath(collectionPath: string, relativePath: string): string | null {

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { COLLECTION_TIMEOUT_MS, runCollection } from '../core/execute.js';
 import {
   collectionPathSchema,
+  errorText,
   textResult,
   unknownCollectionMessage,
   unknownEnvironmentMessage,
@@ -127,7 +128,7 @@ export const registerRunCollectionTool = (server: McpServer, { registry, verbose
         });
         return textResult(result, !result.ok);
       } catch (err: any) {
-        return textResult({ error: `Something went wrong while running the collection: ${err && err.message ? err.message : String(err)}` }, true);
+        return textResult({ error: `Something went wrong while running the collection: ${errorText(err)}` }, true);
       }
     }
   );

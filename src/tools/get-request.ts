@@ -1,8 +1,15 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
 
 import { parseRequestFile } from '../core/readCollection.js';
-import { collectionPathSchema, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
+import {
+  collectionPathSchema,
+  errorText,
+  requestNotFoundMessage,
+  requestPathSchema,
+  textResult,
+  unknownCollectionMessage,
+  type ToolContext
+} from './helpers.js';
 
 export const registerGetRequestTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
@@ -15,9 +22,7 @@ export const registerGetRequestTool = (server: McpServer, { registry }: ToolCont
         'Use this to inspect what a request does before running it or to understand its configuration.',
       inputSchema: {
         collectionPath: collectionPathSchema(),
-        requestPath: z
-          .string()
-          .describe('Relative path of the request inside the collection, as returned by list_requests (e.g. "users/get-user.bru").'),
+        requestPath: requestPathSchema(),
       },
       annotations: {
         readOnlyHint: true,
@@ -33,14 +38,7 @@ export const registerGetRequestTool = (server: McpServer, { registry }: ToolCont
 
       const resolved = registry.resolveRequestPath(collectionPath, requestPath);
       if (!resolved) {
-        return textResult(
-          {
-            error: `Request not found: "${requestPath}" in collection "${collection.name}"`,
-            hint: 'Use the exact relative path from list_requests.',
-            availableRequests: (registry.listRequests(collectionPath) || []).map((r) => r.relativePath)
-          },
-          true
-        );
+        return textResult(requestNotFoundMessage(registry, collection, requestPath), true);
       }
 
       try {
@@ -51,7 +49,7 @@ export const registerGetRequestTool = (server: McpServer, { registry }: ToolCont
       } catch (err: any) {
         return textResult(
           {
-            error: `Could not parse request "${requestPath}": ${err && err.message ? err.message : String(err)}`,
+            error: `Could not parse request "${requestPath}": ${errorText(err)}`,
             hint: 'The file may be corrupted or invalid.'
           },
           true
