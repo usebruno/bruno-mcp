@@ -13,14 +13,13 @@ const SERVER_NAME = 'bruno-mcp';
 
 interface CreateServerArgs {
   config: DiscoveryConfig;
-  verbose?: boolean;
 }
 
-export const createServer = ({ config, verbose = false }: CreateServerArgs): McpServer => {
+export const createServer = ({ config }: CreateServerArgs): McpServer => {
   const registry = new CollectionRegistry(config);
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
-  registerTools(server, { registry, verbose });
+  registerTools(server, { registry });
 
   return server;
 };

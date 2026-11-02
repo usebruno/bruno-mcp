@@ -25,7 +25,7 @@ const isDataFile = (filePath: string): boolean => {
   }
 };
 
-export const registerRunCollectionTool = (server: McpServer, { registry, verbose }: ToolContext): void => {
+export const registerRunCollectionTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
     'run_collection',
     {
@@ -123,8 +123,7 @@ export const registerRunCollectionTool = (server: McpServer, { registry, verbose
           dataFile: dataFilePath,
           parallel,
           bail,
-          timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : undefined,
-          verbose
+          timeoutMs: timeoutSeconds ? timeoutSeconds * 1000 : undefined
         });
         return textResult(result, !result.ok);
       } catch (err: any) {

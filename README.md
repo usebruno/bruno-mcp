@@ -41,7 +41,7 @@ Everything else comes back as-is, including **response headers**: a `Set-Cookie`
 
 `get_environment` replaces the value of every variable marked secret with `<redacted>`. Non-secret values are returned as stored on disk, so a credential kept in a plain variable is returned as-is.
 
-`run_collection` leaves headers and bodies out, but failed assertion/test messages, per-request errors, and `diagnostics` carry only the CLI masking above, so an assertion on a response value can echo that value back.
+`run_collection` leaves headers and bodies out, but failed assertion/test messages, per-request errors, and the run `error` carry only the CLI masking above, so an assertion on a response value can echo that value back.
 
 Response bodies are not truncated by this server. Every MCP client applies its own ceiling, so a second cap here would only lose bodies the client would have accepted.
 
