@@ -18,6 +18,13 @@ export const detectFormat = (collectionPath: string): CollectionFormat | null =>
   return null;
 };
 
+export const ENVIRONMENTS_DIR = 'environments';
+export const SKIPPED_DIRS = new Set(['.git', 'node_modules']);
+
+// Root `environments` only, a nested folder of that name holds ordinary requests.
+export const isInEnvironmentsDir = (collectionPath: string, target: string): boolean =>
+  path.relative(collectionPath, target).split(path.sep)[0] === ENVIRONMENTS_DIR;
+
 export const isRequestFile = (collectionPath: string, filePath: string, format: CollectionFormat): boolean => {
   const { ext, collectionFile, folderFile } = FORMAT_FILES[format];
   if (path.extname(filePath) !== ext) return false;
@@ -25,27 +32,30 @@ export const isRequestFile = (collectionPath: string, filePath: string, format: 
   const base = path.basename(filePath);
   if (base === collectionFile || base === folderFile) return false;
 
-  // Root `environments` only, a nested folder of that name holds ordinary requests.
-  const segments = path.relative(collectionPath, filePath).split(path.sep);
-  return segments[0] !== 'environments';
+  return !isInEnvironmentsDir(collectionPath, filePath);
 };
 
 export const parseRequestFile = (filePath: string, format: CollectionFormat): any =>
   parseRequest(fs.readFileSync(filePath, 'utf8'), { format });
 
-const readFolderSeq = (dir: string, format: CollectionFormat): number | undefined => {
+interface FolderMeta {
+  name?: string;
+  seq?: number;
+}
+
+const readFolderMeta = (dir: string, format: CollectionFormat): FolderMeta => {
   const folderPath = path.join(dir, FORMAT_FILES[format].folderFile);
-  if (!fs.existsSync(folderPath)) return undefined;
+  if (!fs.existsSync(folderPath)) return {};
   try {
     const parsed = parseFolder(fs.readFileSync(folderPath, 'utf8'), { format });
     // The .bru parser returns a rejected promise on malformed files instead of throwing.
     if (typeof parsed?.then === 'function') {
       parsed.catch(() => {});
-      return undefined;
+      return {};
     }
-    return parsed?.meta?.seq;
+    return { name: parsed?.meta?.name || undefined, seq: parsed?.meta?.seq };
   } catch (_) {
-    return undefined;
+    return {};
   }
 };
 
@@ -214,7 +224,6 @@ export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {
     throw new Error(`Not a Bruno collection: ${collectionPath}`);
   }
 
-  const environmentsPath = path.join(collectionPath, 'environments');
   const index: RequestInfo[] = [];
 
   const traverse = (currentPath: string): void => {
@@ -226,8 +235,8 @@ export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {
       const stats = fs.lstatSync(filePath);
 
       if (stats.isDirectory()) {
-        if (filePath === environmentsPath || file === '.git' || file === 'node_modules') continue;
-        folders.push({ name: file, pathname: filePath, seq: readFolderSeq(filePath, format) });
+        if (isInEnvironmentsDir(collectionPath, filePath) || SKIPPED_DIRS.has(file)) continue;
+        folders.push({ name: file, pathname: filePath, seq: readFolderMeta(filePath, format).seq });
       } else {
         if (!isRequestFile(collectionPath, filePath, format)) continue;
         const scanned = scanRequest(filePath, format);
@@ -252,3 +261,50 @@ export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {
   traverse(collectionPath);
   return index;
 };
+
+export interface FolderNode {
+  name: string;
+  path: string;
+  requestCount: number;
+  children: FolderNode[];
+}
+
+export const readFolderTree = (collectionPath: string): FolderNode[] => {
+  const format = detectFormat(collectionPath);
+  if (!format) {
+    throw new Error(`Not a Bruno collection: ${collectionPath}`);
+  }
+
+  const requestPaths = readCollectionIndex(collectionPath).map((r) => r.relativePath);
+
+  const foldersIn = (currentPath: string) =>
+    fs
+      .readdirSync(currentPath, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !SKIPPED_DIRS.has(entry.name))
+      .map((entry) => path.join(currentPath, entry.name))
+      .filter((pathname) => !isInEnvironmentsDir(collectionPath, pathname))
+      .map((pathname) => {
+        const meta = readFolderMeta(pathname, format);
+        return { name: path.basename(pathname), seq: meta.seq, displayName: meta.name, pathname };
+      });
+
+  const traverse = (currentPath: string): FolderNode[] =>
+    sortByNameThenSequence(foldersIn(currentPath)).map(({ name, displayName, pathname }) => {
+      const relativePath = toPosixPath(path.relative(collectionPath, pathname));
+      return {
+        name: displayName || name,
+        path: relativePath,
+        requestCount: requestPaths.filter((p) => p.startsWith(relativePath + '/')).length,
+        children: traverse(pathname)
+      };
+    });
+
+  return traverse(collectionPath);
+};
+
+export const directorySizeBytes = (dir: string): number =>
+  fs.readdirSync(dir, { withFileTypes: true }).reduce((total, entry) => {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) return SKIPPED_DIRS.has(entry.name) ? total : total + directorySizeBytes(entryPath);
+    return total + fs.lstatSync(entryPath).size;
+  }, 0);

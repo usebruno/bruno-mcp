@@ -4,9 +4,10 @@ import { z } from 'zod';
 import { readEnvironmentVariables } from '../core/environments.js';
 import {
   collectionPathSchema,
+  errorText,
+  findEnvironment,
   textResult,
   unknownCollectionMessage,
-  unknownEnvironmentMessage,
   type ToolContext
 } from './helpers.js';
 
@@ -35,19 +36,9 @@ export const registerGetEnvironmentTool = (server: McpServer, { registry }: Tool
         return textResult(unknownCollectionMessage(registry, collectionPath), true);
       }
 
-      const environments = registry.environmentFiles(collectionPath);
-      const environment = environments.find((env) => env.name === name);
-      if (!environment) {
-        return textResult(
-          unknownEnvironmentMessage(
-            collection,
-            name,
-            environments.map((env) => env.name),
-            'Environment names are case-sensitive.'
-          ),
-          true
-        );
-      }
+      const found = findEnvironment(registry, collection, name);
+      if ('error' in found) return found.error;
+      const { environment } = found;
 
       try {
         return textResult({
@@ -57,7 +48,7 @@ export const registerGetEnvironmentTool = (server: McpServer, { registry }: Tool
       } catch (err: any) {
         return textResult(
           {
-            error: `Could not parse environment "${name}": ${err && err.message ? err.message : String(err)}`,
+            error: `Could not parse environment "${name}": ${errorText(err)}`,
             hint: 'The file may be corrupted or invalid.'
           },
           true

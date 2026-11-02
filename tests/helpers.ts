@@ -54,6 +54,18 @@ export const removeTempDirs = (): void => {
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 };
 
+export const copyCollection = (source: string): string => {
+  const dir = path.join(makeTempDir(), path.basename(source));
+  fs.cpSync(source, dir, { recursive: true });
+  return dir;
+};
+
+export const readFile = (root: string, relativePath: string): string => fs.readFileSync(path.join(root, relativePath), 'utf8');
+
+export const fileExists = (root: string, relativePath: string): boolean => fs.existsSync(path.join(root, relativePath));
+
+export const listFiles = (dir: string): string[] => fs.readdirSync(dir, { recursive: true }).map(String).sort();
+
 export const writeFiles = (root: string, files: Record<string, string>): string => {
   for (const [relativePath, content] of Object.entries(files)) {
     const filePath = path.join(root, relativePath);
@@ -63,9 +75,17 @@ export const writeFiles = (root: string, files: Record<string, string>): string 
   return root;
 };
 
+export interface ReceivedRequest {
+  method: string;
+  url: string;
+  authorization: string | undefined;
+  body: string;
+}
+
 export interface TestHttpServer {
   baseUrl: string;
   hits: string[];
+  received: ReceivedRequest[];
   maxInFlight: number;
   /** Hold responses until this many requests are in flight at once (or HOLD_TIMEOUT_MS passes). */
   holdUntilInFlight: number;
@@ -85,7 +105,14 @@ export const startHttpServer = async (): Promise<TestHttpServer> => {
   };
 
   const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => handle(req, res, body));
+  });
+
+  const handle = (req: http.IncomingMessage, res: http.ServerResponse, body: string) => {
     api.hits.push(req.url || '');
+    api.received.push({ method: req.method || '', url: req.url || '', authorization: req.headers.authorization, body });
     inFlight += 1;
     api.maxInFlight = Math.max(api.maxInFlight, inFlight);
 
@@ -107,17 +134,19 @@ export const startHttpServer = async (): Promise<TestHttpServer> => {
     }
     releaseAll();
     respond();
-  });
+  };
 
   const api: TestHttpServer = {
     baseUrl: '',
     hits: [],
+    received: [],
     maxInFlight: 0,
     holdUntilInFlight: 1,
     reset: () => {
       releaseAll();
       inFlight = 0;
       api.hits.length = 0;
+      api.received.length = 0;
       api.maxInFlight = 0;
       api.holdUntilInFlight = 1;
     },
