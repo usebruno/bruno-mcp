@@ -123,7 +123,19 @@ interface RawRunResult {
   report: any;
   stderr: string;
   parseError: string | null;
+  stdout?: string | null;
+  reportParseError?: string | null;
 }
+
+const diagnosticsOf = (
+  stderr: string | null | undefined,
+  stdout: string | null | undefined,
+  reportParseError: string | null | undefined
+) => ({
+  stderr: stderr?.trim() ?? null,
+  stdout: stdout?.trim() ? stdout.trim() : null,
+  reportParseError: reportParseError ?? null
+});
 
 const normalizeReport = (report: any): { entries: any[]; summary: any } => {
   const iterations = Array.isArray(report) ? report : [];
@@ -197,7 +209,7 @@ const sumSummaries = (iterations: any[]): Record<string, number> => {
 };
 
 export const formatRunResult = (
-  { exitCode, report, stderr, stdout, reportParseError }: RawRunResult,
+  { exitCode, report, stderr, stdout, reportParseError, parseError }: RawRunResult,
   format: CollectionFormat | null,
   durationMs: number
 ) => {
@@ -205,7 +217,7 @@ export const formatRunResult = (
   const multiIteration = iterations.length > 1;
   const totals = sumSummaries(iterations);
   const ran = (totals.totalRequests || 0) > 0;
-  const diagnostics = diagnosticsOf(stderr, stdout, reportParseError);
+  const diagnostics = diagnosticsOf(stderr, stdout, reportParseError ?? parseError);
 
   const requests = iterations.flatMap((iteration) =>
     (Array.isArray(iteration?.results) ? iteration.results : []).map((entry: any) => {
