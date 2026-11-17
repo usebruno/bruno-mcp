@@ -11,6 +11,7 @@ import type { RegisteredCollection } from '../types.js';
 
 export interface ToolContext {
   registry: CollectionRegistry;
+  verbose?: boolean;
 }
 
 export const textResult = (obj: unknown, isError = false): CallToolResult => ({
