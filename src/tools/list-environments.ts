@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { readEnvironmentVariables } from '../core/environments.js';
-import { collectionPathSchema, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
+import { collectionPathSchema, errorText, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
 
 export const registerListEnvironmentsTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
@@ -31,7 +31,7 @@ export const registerListEnvironmentsTool = (server: McpServer, { registry }: To
           const variables = await readEnvironmentVariables(env);
           return { name: env.name, variableCount: variables.length, hasSecrets: variables.some((v) => v.secret) };
         } catch (err: any) {
-          return { name: env.name, error: `Could not parse environment: ${err && err.message ? err.message : String(err)}` };
+          return { name: env.name, error: `Could not parse environment: ${errorText(err)}` };
         }
       }));
 

@@ -1,9 +1,14 @@
+import path from 'node:path';
+
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { executeRequest } from '../core/execute.js';
 import {
   collectionPathSchema,
+  errorText,
+  requestNotFoundMessage,
+  requestPathSchema,
   textResult,
   unknownCollectionMessage,
   unknownEnvironmentMessage,
@@ -30,9 +35,7 @@ export const registerExecuteRequestTool = (server: McpServer, { registry }: Tool
         'Returns the HTTP status, headers, response body, and any test results.',
       inputSchema: {
         collectionPath: collectionPathSchema(),
-        requestPath: z
-          .string()
-          .describe('Relative path of the request inside the collection, as returned by list_requests (e.g. "users/get-user.bru").'),
+        requestPath: requestPathSchema(),
         environment: z.string().optional().describe('Environment name to run against. Omit to run with no environment.'),
         variables: variablesSchema()
       },
@@ -52,14 +55,7 @@ export const registerExecuteRequestTool = (server: McpServer, { registry }: Tool
 
       const resolved = registry.resolveRequestPath(collectionPath, requestPath);
       if (!resolved) {
-        return textResult(
-          {
-            error: `Request not found: "${requestPath}" in collection "${collection.name}"`,
-            hint: 'Use the exact relative path from list_requests.',
-            availableRequests: (registry.listRequests(collectionPath) || []).map((r) => r.relativePath)
-          },
-          true
-        );
+        return textResult(requestNotFoundMessage(registry, collection, requestPath), true);
       }
 
       if (environment) {
@@ -72,7 +68,7 @@ export const registerExecuteRequestTool = (server: McpServer, { registry }: Tool
       try {
         const result = await executeRequest({
           collectionPath: collection.path,
-          requestPath: resolved.path,
+          requestPath: path.relative(collection.path, resolved.path),
           environment,
           variables
         });
@@ -87,7 +83,7 @@ export const registerExecuteRequestTool = (server: McpServer, { registry }: Tool
           !result.ok
         );
       } catch (err: any) {
-        return textResult({ error: `Something went wrong while running the request: ${err && err.message ? err.message : String(err)}` }, true);
+        return textResult({ error: `Something went wrong while running the request: ${errorText(err)}` }, true);
       }
     }
   );

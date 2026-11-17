@@ -6,8 +6,7 @@ const rawRun = (report: unknown, exitCode = 0, stderr = '') => ({
   exitCode,
   report,
   stderr,
-  stdout: '',
-  reportParseError: null
+  parseError: null
 });
 
 const summary = (overrides: Record<string, number> = {}) => ({
