@@ -193,8 +193,8 @@ const NO_ITERATIONS_ERROR =
   'Nothing ran: the data file has no rows. A CSV needs a header plus at least one row; a JSON data file must be a non-empty array of objects.';
 const NO_REQUESTS_ERROR = 'Nothing ran: no runnable requests were found in the selection.';
 
-const emptyRunError = (exitCode: number | null, report: unknown, iterationCount: number, stderr: string | null) => {
-  if (exitCode !== 0 || !Array.isArray(report)) return stderr;
+const emptyRunError = ({ exitCode, report, stderr, parseError }: RawRunResult, iterationCount: number) => {
+  if (exitCode !== 0 || !Array.isArray(report)) return formatRunFailure(exitCode, stderr, parseError, report != null);
   return iterationCount === 0 ? NO_ITERATIONS_ERROR : NO_REQUESTS_ERROR;
 };
 
@@ -210,9 +210,11 @@ const sumSummaries = (iterations: any[]): Record<string, number> => {
 
 export const formatRunResult = (
   { exitCode, report, stderr, stdout, reportParseError, parseError }: RawRunResult,
+  raw: RawRunResult,
   format: CollectionFormat | null,
   durationMs: number
 ) => {
+  const { exitCode, report } = raw;
   const iterations: any[] = Array.isArray(report) ? report : [];
   const multiIteration = iterations.length > 1;
   const totals = sumSummaries(iterations);
@@ -253,8 +255,7 @@ export const formatRunResult = (
       durationMs
     },
     requests,
-    error: ran ? null : emptyRunError(exitCode, report, iterations.length, diagnostics.stderr),
-    diagnostics
+    error: ran ? null : emptyRunError(raw, iterations.length)
   };
 };
 
@@ -263,7 +264,6 @@ interface RunBruArgs {
   paths: string[];
   options?: CollectionRunOptions;
   extraArgs?: string[];
-  verbose?: boolean;
   timeoutMs?: number;
 }
 
@@ -341,14 +341,12 @@ interface RunCollectionArgs extends CollectionRunOptions {
   collectionPath: string;
   /** Request files and/or folders relative to the collection; empty runs the whole collection. */
   paths?: string[];
-  verbose?: boolean;
   timeoutMs?: number;
 }
 
 export const runCollection = async ({
   collectionPath,
   paths = [],
-  verbose = false,
   timeoutMs = COLLECTION_TIMEOUT_MS,
   ...options
 }: RunCollectionArgs) => {
@@ -359,7 +357,6 @@ export const runCollection = async ({
     options,
     // The roll-up never returns headers or bodies, so keep them out of the report file too.
     extraArgs: ['-r', '--reporter-skip-body', '--reporter-skip-all-headers'],
-    verbose,
     timeoutMs
   });
   return formatRunResult(raw, detectFormat(collectionPath), Date.now() - startedAt);
