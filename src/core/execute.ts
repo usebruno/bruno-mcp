@@ -209,12 +209,11 @@ const sumSummaries = (iterations: any[]): Record<string, number> => {
 };
 
 export const formatRunResult = (
-  { exitCode, report, stderr, stdout, reportParseError, parseError }: RawRunResult,
   raw: RawRunResult,
   format: CollectionFormat | null,
   durationMs: number
 ) => {
-  const { exitCode, report } = raw;
+  const { exitCode, report, stderr, stdout, reportParseError, parseError } = raw;
   const iterations: any[] = Array.isArray(report) ? report : [];
   const multiIteration = iterations.length > 1;
   const totals = sumSummaries(iterations);
