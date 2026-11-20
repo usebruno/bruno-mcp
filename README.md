@@ -21,6 +21,16 @@ Set up Bruno MCP for me so you can work with my Bruno API collections:
 2. Let me know when it's ready and whether I need to restart anything.
 ```
 
+### Set up from your terminal
+
+```bash
+npx @usebruno/mcp setup
+```
+
+It finds the MCP clients on your machine (Claude Code, Claude Desktop, Cursor, VS Code, Codex), lets you pick some or all of them, and adds Bruno MCP to each. Existing servers are kept, and a client that already has `bruno` is left as is.
+
+To skip the prompt, e.g. in a script: `npx @usebruno/mcp setup --all` or `npx @usebruno/mcp setup --client cursor --client codex`.
+
 ### Claude Code
 
 ```bash
@@ -53,6 +63,47 @@ Add to `~/.cursor/mcp.json`:
 ```
 
 Reload Cursor, or toggle the server in Settings > MCP.
+
+### VS Code
+
+#### One-click install
+
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Bruno_MCP-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522bruno%2522%252C%2522type%2522%253A%2522stdio%2522%252C%2522command%2522%253A%2522npx%2522%252C%2522args%2522%253A%255B%2522-y%2522%252C%2522%2540usebruno%252Fmcp%2522%255D%257D)
+
+#### Manual config
+
+Add to `~/.copilot/mcp-config.json`:
+
+```json
+{
+  "mcpServers": {
+    "bruno": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@usebruno/mcp"],
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+Reload the window (Developer: Reload Window).
+
+### Codex
+
+```bash
+codex mcp add bruno -- npx -y @usebruno/mcp
+```
+
+Or add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.bruno]
+command = "npx"
+args = ["-y", "@usebruno/mcp"]
+```
+
+Check it with `codex mcp list`, then start a new session.
 
 ### Claude Desktop
 
@@ -155,6 +206,8 @@ Usage: bruno-mcp [--collection <path>] [--workspace <path>]
 | `--no-auto-discovery` | Disable the Bruno desktop preferences fallback. |
 | `--verbose` | Log debug info to stderr. |
 | `--help`, `-h` | Show help. |
+
+`bruno-mcp setup` is the separate install command described in [Set up from your terminal](#set-up-from-your-terminal); it takes `--client <id>` (`claude-code`, `claude-desktop`, `cursor`, `vscode`, `codex`; repeatable) and `--all`.
 
 ## Links
 
