@@ -29,6 +29,9 @@
     "license.md",
     "package.json"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20.12"
   },
