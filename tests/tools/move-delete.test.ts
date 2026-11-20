@@ -13,7 +13,8 @@ import {
   fileExists,
   listFiles,
   readFile,
-  removeTempDirs
+  removeTempDirs,
+  writeFiles
 } from '../helpers.js';
 
 let client: Client;
@@ -38,7 +39,7 @@ describe('move_request', () => {
     const { isError, body } = await move(collectionPath, { requestPath: 'users/get-user.bru', targetFolder: 'archive' });
 
     expect(isError).toBe(false);
-    expect(body).toEqual({ ok: true, operation: 'move', from: path.join('users', 'get-user.bru'), to: path.join('archive', 'get-user.bru') });
+    expect(body).toEqual({ ok: true, operation: 'move', from: 'users/get-user.bru', to: 'archive/get-user.bru' });
     expect(fileExists(collectionPath, 'users/get-user.bru')).toBe(false);
     expect(readFile(collectionPath, 'archive/get-user.bru')).toBe(original);
   });
@@ -57,7 +58,7 @@ describe('move_request', () => {
 
     const { body } = await move(collectionPath, { requestPath: 'health.bru', targetFolder: 'users', copy: true });
 
-    expect(body).toMatchObject({ ok: true, operation: 'copy', to: path.join('users', 'health.bru') });
+    expect(body).toMatchObject({ ok: true, operation: 'copy', to: 'users/health.bru' });
     expect(readFile(collectionPath, 'health.bru')).toBe(readFile(BRU_COLLECTION, 'health.bru'));
     expect(readFile(collectionPath, 'users/health.bru')).toBe(readFile(BRU_COLLECTION, 'health.bru').replace('seq: 1', 'seq: 3'));
   });
@@ -72,8 +73,8 @@ describe('move_request', () => {
     expect(body).toEqual({
       ok: true,
       operation: 'move',
-      from: path.join('users', 'get-user.bru'),
-      to: path.join('imported', 'get-user.yml'),
+      from: 'users/get-user.bru',
+      to: 'imported/get-user.yml',
       targetCollectionPath: target
     });
     expect(fileExists(source, 'users/get-user.bru')).toBe(false);
@@ -112,7 +113,7 @@ describe('move_request', () => {
     const { isError, body } = await move(collectionPath, { requestPath: 'users/get-user.bru', targetFolder: 'users', copy: true });
 
     expect(isError).toBe(true);
-    expect(body.error).toBe(`"${path.join('users', 'get-user.bru')}" is already in that folder.`);
+    expect(body.error).toBe('"users/get-user.bru" is already in that folder.');
     expect(listFiles(collectionPath)).toEqual(before);
   });
 
@@ -124,7 +125,7 @@ describe('move_request', () => {
     const { isError, body } = await move(collectionPath, { requestPath: 'health.bru', targetCollectionPath: collectionPath, targetFolder: 'users' });
 
     expect(isError).toBe(true);
-    expect(body.error).toBe(`A request already exists at "${path.join('users', 'health.bru')}" in collection "Bru Fixture".`);
+    expect(body.error).toBe('A request already exists at "users/health.bru" in collection "Bru Fixture".');
     expect(listFiles(collectionPath)).toEqual(before);
   });
 
@@ -132,7 +133,12 @@ describe('move_request', () => {
     const { isError, body } = await move(copyCollection(BRU_COLLECTION), { requestPath: 'nope.bru', targetFolder: 'users' });
 
     expect(isError).toBe(true);
-    expect(body.availableRequests).toEqual([path.join('users', 'get-user.bru'), path.join('users', 'missing-user.bru'), 'health.bru']);
+    expect(body.availableRequests).toEqual(['users/get-user.bru', 'users/missing-user.bru', 'health.bru']);
+  });
+
+  it('is marked destructive, since a move deletes the original', async () => {
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === 'move_request')?.annotations?.destructiveHint).toBe(true);
   });
 });
 
@@ -146,7 +152,7 @@ describe('delete_request', () => {
     const { isError, body } = await remove(collectionPath, { requestPaths: ['health.bru', 'users/missing-user.bru', 'users/gone.bru'] });
 
     expect(isError).toBe(false);
-    expect(body).toEqual({ ok: true, deleted: 2, deletedPaths: ['health.bru', path.join('users', 'missing-user.bru')], notFound: [path.join('users', 'gone.bru')] });
+    expect(body).toEqual({ ok: true, deleted: 2, deletedPaths: ['health.bru', 'users/missing-user.bru'], notFound: ['users/gone.bru'] });
     expect(fileExists(collectionPath, 'health.bru')).toBe(false);
     expect(fileExists(collectionPath, 'users/get-user.bru')).toBe(true);
   });
@@ -156,7 +162,7 @@ describe('delete_request', () => {
 
     const { body } = await remove(collectionPath, { requestPaths: ['users/get-user.yml'] });
 
-    expect(body).toEqual({ ok: true, deleted: 1, deletedPaths: [path.join('users', 'get-user.yml')] });
+    expect(body).toEqual({ ok: true, deleted: 1, deletedPaths: ['users/get-user.yml'] });
   });
 
   it.each([
@@ -191,5 +197,15 @@ describe('delete_request', () => {
     expect(isError).toBe(true);
     expect(text).toMatch(new RegExp(`Input validation error: .*at ${field}$`));
     expect(fileExists(collectionPath, 'health.bru')).toBe(true);
+  });
+
+  it('refuses a .yml file that is not a Bruno request, such as a CI workflow', async () => {
+    const collectionPath = writeFiles(copyCollection(YML_COLLECTION), { '.github/workflows/ci.yml': 'name: CI\non: push\njobs: {}\n' });
+
+    const { isError, body } = await remove(collectionPath, { requestPaths: ['.github/workflows/ci.yml'] });
+
+    expect(isError).toBe(true);
+    expect(body.error).toBe('Not a request in collection "Yml Fixture": .github/workflows/ci.yml');
+    expect(fileExists(collectionPath, '.github/workflows/ci.yml')).toBe(true);
   });
 });

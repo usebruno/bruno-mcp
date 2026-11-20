@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
@@ -101,7 +99,7 @@ describe('add_test_script', () => {
 
     expect(isError).toBe(true);
     expect(body.error).toBe('Request not found: "users/get-user" in collection "Bru Fixture"');
-    expect(body.availableRequests).toEqual([path.join('users', 'get-user.bru'), path.join('users', 'missing-user.bru'), 'health.bru']);
+    expect(body.availableRequests).toEqual(['users/get-user.bru', 'users/missing-user.bru', 'health.bru']);
   });
 });
 

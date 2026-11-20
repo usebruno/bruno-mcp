@@ -4,7 +4,17 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
-import { callTool, connectClient, fileExists, makeTempDir, readFile, removeTempDirs, writeFiles } from '../helpers.js';
+import {
+  BRU_COLLECTION,
+  ISOLATED_CONFIG,
+  callTool,
+  connectClient,
+  fileExists,
+  makeTempDir,
+  readFile,
+  removeTempDirs,
+  writeFiles
+} from '../helpers.js';
 
 const GITIGNORE = '# Secrets\n.env*\n\n# Dependencies\nnode_modules\n\n# OS files\n.DS_Store\nThumbs.db';
 
@@ -170,5 +180,20 @@ describe('create_collection', () => {
       expect(body.error).toMatch(/^Not a Bruno workspace/);
       expect(fs.existsSync(outputPath)).toBe(false);
     });
+  });
+
+  it('keeps a collection it created usable when the server is scoped to others', async () => {
+    const scoped = await connectClient({ ...ISOLATED_CONFIG, explicitCollections: [BRU_COLLECTION] });
+    try {
+      const outputPath = path.join(makeTempDir(), 'payments');
+      expect((await callTool(scoped, 'create_collection', { name: 'Payments', outputPath })).isError).toBe(false);
+
+      const { isError } = await callTool(scoped, 'write_request', { collectionPath: outputPath, requestPath: 'ping.yml', url: 'http://x' });
+
+      expect(isError).toBe(false);
+      expect(fileExists(outputPath, 'ping.yml')).toBe(true);
+    } finally {
+      await scoped.close();
+    }
   });
 });

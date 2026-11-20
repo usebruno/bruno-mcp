@@ -5,7 +5,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { CollectionRegistry } from '../core/collections.js';
-import { FORMAT_FILES, detectFormat, parseRequestFile, type CollectionFormat } from '../core/readCollection.js';
+import { FORMAT_FILES, detectFormat, parseRequestFile, toPosixPath, type CollectionFormat } from '../core/readCollection.js';
 import {
   HTTP_METHODS,
   applyRequestEdit,
@@ -111,10 +111,14 @@ const planWrite = (
   if (!target) {
     return { error: `Not a request path in this collection: "${wanted}". Requests go inside the collection, outside its environments folder.` };
   }
-  const relativePath = path.relative(collection.path, target.path);
+  const relativePath = toPosixPath(path.relative(collection.path, target.path));
 
   const exists = fs.existsSync(target.path);
   if (exists && !fs.statSync(target.path).isFile()) return { error: `Not a file: "${relativePath}"` };
+  // Creating by name never edits: different names can sanitize to the same file ("Get user?" and "Get user-").
+  if (exists && !requestPath) {
+    return { error: `A request already exists at "${relativePath}". Pass requestPath to edit it, or pick another name.` };
+  }
 
   let item: any;
   if (exists) {

@@ -10,7 +10,7 @@ import { errorText, textResult, type ToolContext } from './helpers.js';
 
 const isEmptyDir = (dir: string): boolean => fs.statSync(dir).isDirectory() && fs.readdirSync(dir).length === 0;
 
-export const registerCreateCollectionTool = (server: McpServer, _ctx: ToolContext): void => {
+export const registerCreateCollectionTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
     'create_collection',
     {
@@ -68,6 +68,7 @@ export const registerCreateCollectionTool = (server: McpServer, _ctx: ToolContex
 
       try {
         createCollection({ dir, name, format, description, baseUrl });
+        registry.addCreated(dir);
       } catch (err: any) {
         return textResult({ error: `Could not create the collection: ${errorText(err)}` }, true);
       }

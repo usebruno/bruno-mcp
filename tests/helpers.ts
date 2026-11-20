@@ -24,8 +24,8 @@ export const ISOLATED_CONFIG: DiscoveryConfig = {
   autoDiscovery: false
 };
 
-export const connectClient = async (): Promise<Client> => {
-  const server = createServer({ config: ISOLATED_CONFIG });
+export const connectClient = async (config: DiscoveryConfig = ISOLATED_CONFIG): Promise<Client> => {
+  const server = createServer({ config });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'bruno-mcp-tests', version: '0.0.0' });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);

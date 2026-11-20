@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -43,7 +44,9 @@ export const unknownCollectionMessage = (registry: CollectionRegistry, collectio
 
   return {
     error: `No Bruno collection at: ${collectionPath}`,
-    hint: 'collectionPath is the directory holding bruno.json or opencollection.yml. Any collection on this machine works; the list below is only what this server was configured or discovered to see.',
+    hint: registry.scoped
+      ? 'This server is limited to the collections passed with --collection/--workspace, listed below. Ask the user to add the collection to the server config to use it.'
+      : 'collectionPath is the directory holding bruno.json or opencollection.yml. Any collection on this machine works; the list below is only what this server was configured or discovered to see.',
     availableCollections: registry.list().map((c) => ({ name: c.name, path: c.path }))
   };
 };
@@ -75,6 +78,27 @@ export const variablesSchema = () =>
     .describe(
       'Override (or add) environment variables for this run, replacing any values from the environment.'
     );
+
+const fileLocks = new Map<string, Promise<unknown>>();
+
+// Runs read-modify-write updates of one file one after another. MCP clients call tools in parallel, and two updates
+// that both read the file before either writes would otherwise lose one of the changes. Keyed by the real path, so
+// the same file reached through a symlink or another spelling shares the lock.
+export const withFileLock = async <T>(file: string, update: () => Promise<T>): Promise<T> => {
+  let key = file;
+  try {
+    key = fs.realpathSync.native(file);
+  } catch (_) {}
+  const previous = fileLocks.get(key) ?? Promise.resolve();
+  const run = previous.then(update);
+  const settled = run.catch(() => undefined);
+  fileLocks.set(key, settled);
+  try {
+    return await run;
+  } finally {
+    if (fileLocks.get(key) === settled) fileLocks.delete(key);
+  }
+};
 
 export const errorText = (err: any): string => (err && err.message ? err.message : String(err));
 

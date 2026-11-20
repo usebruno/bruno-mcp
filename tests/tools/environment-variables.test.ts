@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
@@ -33,6 +36,15 @@ const set = (collectionPath: string, args: Record<string, unknown>) =>
 
 const remove = (collectionPath: string, args: Record<string, unknown>) =>
   callTool(client, 'remove_environment_variable', { collectionPath, environment: 'local', ...args });
+
+const OUTSIDE_ENV = 'vars {\n  a: 1\n}\n';
+
+// environments/linked.bru, a symlink to a file outside the collection; returns that file.
+const linkOutsideEnvironment = (collectionPath: string): string => {
+  const outside = path.join(writeFiles(makeTempDir(), { 'outside.bru': OUTSIDE_ENV }), 'outside.bru');
+  fs.symlinkSync(outside, path.join(collectionPath, 'environments', 'linked.bru'));
+  return outside;
+};
 
 describe('set_environment_variable', () => {
   it('updates a variable in place and adds new ones at the end', async () => {
@@ -153,6 +165,28 @@ describe('set_environment_variable', () => {
     expect(body.error).toMatch(/^Could not update environment "broken"/);
     expect(readFile(collectionPath, 'environments/broken.bru')).toBe('vars {\n  a: 1\n');
   });
+
+  it('does not write through an environment file symlinked from outside the collection', async () => {
+    const collectionPath = copyCollection(BRU_COLLECTION);
+    const outside = linkOutsideEnvironment(collectionPath);
+
+    const { isError, body } = await set(collectionPath, { environment: 'linked', name: 'b', value: '2' });
+
+    expect(isError).toBe(true);
+    expect(body.availableEnvironments).not.toContain('linked');
+    expect(fs.readFileSync(outside, 'utf8')).toBe(OUTSIDE_ENV);
+  });
+
+  it('keeps every variable when several are set in parallel', async () => {
+    const collectionPath = copyCollection(BRU_COLLECTION);
+    const names = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
+
+    const results = await Promise.all(names.map((name) => set(collectionPath, { name, value: name })));
+
+    expect(results.every((r) => !r.isError)).toBe(true);
+    const content = readFile(collectionPath, BRU_ENV);
+    for (const name of names) expect(content).toContain(`  ${name}: ${name}\n`);
+  });
 });
 
 describe('remove_environment_variable', () => {
@@ -193,5 +227,15 @@ describe('remove_environment_variable', () => {
 
     expect(isError).toBe(true);
     expect(body.availableEnvironments).toEqual(['dev']);
+  });
+
+  it('does not write through an environment file symlinked from outside the collection', async () => {
+    const collectionPath = copyCollection(BRU_COLLECTION);
+    const outside = linkOutsideEnvironment(collectionPath);
+
+    const { isError } = await remove(collectionPath, { environment: 'linked', name: 'a' });
+
+    expect(isError).toBe(true);
+    expect(fs.readFileSync(outside, 'utf8')).toBe(OUTSIDE_ENV);
   });
 });

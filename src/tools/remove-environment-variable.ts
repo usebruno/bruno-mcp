@@ -10,6 +10,7 @@ import {
   findEnvironment,
   textResult,
   unknownCollectionMessage,
+  withFileLock,
   type ToolContext
 } from './helpers.js';
 
@@ -44,19 +45,21 @@ export const registerRemoveEnvironmentVariableTool = (server: McpServer, { regis
       if ('error' in found) return found.error;
       const { environment } = found;
 
-      try {
-        const content = await removeEnvironmentVariable(environment, name);
-        if (content !== null) fs.writeFileSync(environment.path, content);
-        return textResult({ ok: true, environment: environment.name, name, removed: content !== null });
-      } catch (err: any) {
-        return textResult(
-          {
-            error: `Could not update environment "${environment.name}": ${errorText(err)}`,
-            hint: 'The environment file may be corrupted or invalid.'
-          },
-          true
-        );
-      }
+      return withFileLock(environment.path, async () => {
+        try {
+          const content = await removeEnvironmentVariable(environment, name);
+          if (content !== null) fs.writeFileSync(environment.path, content);
+          return textResult({ ok: true, environment: environment.name, name, removed: content !== null });
+        } catch (err: any) {
+          return textResult(
+            {
+              error: `Could not update environment "${environment.name}": ${errorText(err)}`,
+              hint: 'The environment file may be corrupted or invalid.'
+            },
+            true
+          );
+        }
+      });
     }
   );
 };

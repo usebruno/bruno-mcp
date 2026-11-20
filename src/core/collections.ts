@@ -10,6 +10,7 @@ import {
   detectFormat,
   isRequestFile,
   readCollectionIndex,
+  toPosixPath,
   type CollectionFormat
 } from './readCollection.js';
 import { listEnvironmentFiles, type EnvironmentFile } from './environments.js';
@@ -33,9 +34,6 @@ const collectionNameFromConfig = (collectionPath: string): string => {
 
   return path.basename(collectionPath);
 };
-
-const listEnvironments = (collectionPath: string): string[] =>
-  listEnvironmentFiles(collectionPath).map((env) => env.name);
 
 export const filterCollections = (
   collections: CollectionListItem[],
@@ -106,9 +104,42 @@ const isInsideOnDisk = (parent: string, child: string): boolean => {
   }
 };
 
+const realPathOf = (p: string): string | null => {
+  try {
+    return fs.realpathSync.native(p);
+  } catch (_) {
+    return null;
+  }
+};
+
+// An environment file must really live in the collection's environments folder, so a symlink can't send a read or
+// a write (or a `bru` run) to a file outside the collection. The folder name is compared ignoring case, like
+// isReservedPath, since the real path keeps whatever case `Environments/` has on disk.
+const isEnvironmentFileOnDisk = (collectionPath: string, filePath: string): boolean => {
+  const realCollection = realPathOf(collectionPath);
+  const real = realPathOf(filePath);
+  if (!realCollection || !real || !isInside(realCollection, real)) return false;
+  return path.relative(realCollection, real).toLowerCase().split(path.sep)[0] === ENVIRONMENTS_DIR;
+};
+
+// Every environment list (list_collections, list/get_environment, the name check before a run) goes through here,
+// so they all agree.
+const safeEnvironmentFiles = (collectionPath: string): EnvironmentFile[] =>
+  listEnvironmentFiles(collectionPath).filter((env) => isEnvironmentFileOnDisk(collectionPath, env.path));
+
+const listEnvironments = (collectionPath: string): string[] => safeEnvironmentFiles(collectionPath).map((env) => env.name);
+
+// The same folder reached through a symlink, or spelled in another case on macOS and Windows.
+const isSameDir = (a: string, b: string): boolean => {
+  if (a === b) return true;
+  const realA = realPathOf(a);
+  return realA !== null && realA === realPathOf(b);
+};
+
 export class CollectionRegistry {
   private config: DiscoveryConfig;
   private collections: RegisteredCollection[] = [];
+  private created = new Set<string>();
 
   constructor(config: DiscoveryConfig) {
     this.config = config;
@@ -125,11 +156,28 @@ export class CollectionRegistry {
     }));
   }
 
+  /** True when --collection/--workspace were passed: the server then only reaches those collections. */
+  get scoped(): boolean {
+    return this.config.explicitCollections.length > 0 || this.config.explicitWorkspaces.length > 0;
+  }
+
+  /** Make a collection created by this server reachable for the rest of the session, scoped or not. */
+  addCreated(collectionPath: string): void {
+    this.created.add(path.resolve(collectionPath));
+  }
+
+  isConfiguredWorkspace(workspacePath: string): boolean {
+    const target = path.resolve(String(workspacePath));
+    return this.config.explicitWorkspaces.some((w) => isSameDir(w, target));
+  }
+
   private find(collectionPath: string): RegisteredCollection | null {
     const target = path.resolve(String(collectionPath));
-    const configured = this.collections.find((c) => c.path === target);
+    const configured =
+      this.collections.find((c) => c.path === target) ?? (this.scoped ? this.collections.find((c) => isSameDir(c.path, target)) : undefined);
     if (configured) return configured;
 
+    if (this.scoped && ![...this.created].some((c) => isSameDir(c, target))) return null;
     if (!isCollectionDir(target)) return null;
     return {
       path: target,
@@ -179,7 +227,7 @@ export class CollectionRegistry {
   environmentFiles(collectionPath: string): EnvironmentFile[] {
     const collection = this.find(collectionPath);
     if (!collection) return [];
-    return listEnvironmentFiles(collection.path);
+    return safeEnvironmentFiles(collection.path);
   }
 
   listRequests(collectionPath: string): RequestInfo[] | null {
@@ -238,7 +286,7 @@ export class CollectionRegistry {
     const target = path.resolve(collection.path, relativePath);
     if (!isInside(collection.path, target)) return null;
 
-    const prefix = path.relative(collection.path, target) + path.sep;
+    const prefix = toPosixPath(path.relative(collection.path, target)) + '/';
     try {
       return readCollectionIndex(collection.path).some((r) => r.relativePath.startsWith(prefix)) ? target : null;
     } catch (_) {

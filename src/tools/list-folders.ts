@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
@@ -40,7 +38,7 @@ export const registerListFoldersTool = (server: McpServer, { registry }: ToolCon
       }
 
       const folders = readFolderTree(collection.path);
-      const rootRequestCount = readCollectionIndex(collection.path).filter((r) => !r.relativePath.includes(path.sep)).length;
+      const rootRequestCount = readCollectionIndex(collection.path).filter((r) => !r.relativePath.includes('/')).length;
       return textResult({
         collectionPath: collection.path,
         collectionName: collection.name,

@@ -7,12 +7,13 @@ import type { DiscoveryConfig } from './types.js';
 export interface ParsedArgs {
   config: DiscoveryConfig;
   verbose: boolean;
+  inheritEnv: boolean;
 }
 
 export const parseArgs = (argv: string[]): ParsedArgs => {
   const parsed = yargs(argv)
     .scriptName('bruno-mcp')
-    .usage('Usage: $0 [--collection <path>] [--workspace <path>] [--no-cwd-discovery] [--no-auto-discovery]')
+    .usage('Usage: $0 [--collection <path>] [--workspace <path>] [--no-cwd-discovery] [--no-auto-discovery] [--inherit-env]')
     .option('collection', {
       alias: 'c',
       type: 'array',
@@ -36,6 +37,12 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
         'Fall back on Bruno desktop preferences when nothing else is scoped (exposes every collection/workspace you last had open). On by default; pass --no-auto-discovery to disable and expose only what you explicitly scope.',
       default: true
     })
+    .option('inherit-env', {
+      type: 'boolean',
+      describe:
+        'Give requests this server\'s whole environment as {{process.env.*}}. Off by default, so a request can\'t read your shell secrets; the collection\'s .env file is always available.',
+      default: false
+    })
     .option('verbose', {
       type: 'boolean',
       describe: 'Log debug info to stderr',
@@ -53,7 +60,8 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       cwdDiscovery: !!parsed['cwd-discovery'],
       autoDiscovery: !!parsed['auto-discovery']
     },
-    verbose: !!parsed.verbose
+    verbose: !!parsed.verbose,
+    inheritEnv: !!parsed['inherit-env']
   };
 };
 
