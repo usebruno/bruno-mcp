@@ -7,6 +7,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { cleanupSessionTmpDir } from '../../src/core/execute.js';
 import {
   BRU_COLLECTION,
+  ISOLATED_CONFIG,
   YML_COLLECTION,
   callTool,
   connectClient,
@@ -86,7 +87,7 @@ describe('write_request', () => {
 
     const { body } = await write(collectionPath, { requestPath: 'users/get-user.bru', method: 'PUT', headers: [{ name: 'Accept', value: 'application/json' }] });
 
-    expect(body).toEqual({ ok: true, writtenPaths: [path.join('users', 'get-user.bru')], createdCount: 0, updatedCount: 1 });
+    expect(body).toEqual({ ok: true, writtenPaths: ['users/get-user.bru'], createdCount: 0, updatedCount: 1 });
     expect(readFile(collectionPath, 'users/get-user.bru')).toBe(
       'meta {\n  name: Get user\n  type: http\n  seq: 1\n}\n\n' +
         'put {\n  url: {{baseUrl}}/users/{{userId}}\n  body: none\n  auth: none\n}\n\n' +
@@ -149,7 +150,7 @@ describe('write_request', () => {
       auth: { mode: 'apikey', apikey: { key: 'X-Api-Key', value: '{{apiKey}}', placement: 'header' } }
     });
 
-    expect(body.writtenPaths).toEqual([path.join('users', 'create-user.yml')]);
+    expect(body.writtenPaths).toEqual(['users/create-user.yml']);
     const parsed = await callTool(client, 'get_request', { collectionPath, requestPath: 'users/create-user.yml' });
     expect(parsed.body.request).toMatchObject({
       name: 'create-user',
@@ -175,7 +176,7 @@ describe('write_request', () => {
         ]
       });
 
-      expect(body).toEqual({ ok: true, writtenPaths: [path.join('billing', 'a.bru'), path.join('billing', 'b.bru'), 'health.bru'], createdCount: 2, updatedCount: 1 });
+      expect(body).toEqual({ ok: true, writtenPaths: ['billing/a.bru', 'billing/b.bru', 'health.bru'], createdCount: 2, updatedCount: 1 });
       expect(readFile(collectionPath, 'billing/a.bru')).toContain('seq: 1');
       expect(readFile(collectionPath, 'billing/b.bru')).toContain('seq: 2');
       expect(readFile(collectionPath, 'health.bru')).toContain('name: Health check');
@@ -261,5 +262,42 @@ describe('write_request', () => {
     expect(isError).toBe(false);
     expect(body.assertionResults).toEqual([expect.objectContaining({ status: 'pass' })]);
     expect(server.received).toEqual([{ method: 'POST', url: '/orders?dry=1', authorization: 'Bearer tok', body: '{\n  "sku": "abc"\n}' }]);
+  });
+
+  it('numbers a new request after the highest seq when a deletion left a gap', async () => {
+    const collectionPath = copyCollection(BRU_COLLECTION);
+    fs.unlinkSync(path.join(collectionPath, 'users', 'get-user.bru')); // seq 1; missing-user.bru keeps seq 2
+
+    await write(collectionPath, { requestPath: 'users/new.bru' });
+
+    expect(readFile(collectionPath, 'users/new.bru')).toContain('seq: 3');
+  });
+
+  it('refuses to create by name over a request whose file name it sanitizes to', async () => {
+    const collectionPath = copyCollection(BRU_COLLECTION);
+    await write(collectionPath, { name: 'Get user-', url: 'http://first' });
+    const before = readFile(collectionPath, 'Get user-.bru');
+
+    const { isError, body } = await write(collectionPath, { name: 'Get user?', url: 'http://second' });
+
+    expect(isError).toBe(true);
+    expect(body.error).toBe('A request already exists at "Get user-.bru". Pass requestPath to edit it, or pick another name.');
+    expect(readFile(collectionPath, 'Get user-.bru')).toBe(before);
+  });
+
+  it('refuses a collection outside the server scope', async () => {
+    const allowed = copyCollection(BRU_COLLECTION);
+    const other = copyCollection(YML_COLLECTION);
+    const scoped = await connectClient({ ...ISOLATED_CONFIG, explicitCollections: [allowed] });
+    try {
+      const { isError, body } = await callTool(scoped, 'write_request', { collectionPath: other, requestPath: 'x.yml', url: 'http://x' });
+
+      expect(isError).toBe(true);
+      expect(body.hint).toMatch(/^This server is limited to the collections passed with --collection\/--workspace/);
+      expect(body.availableCollections).toEqual([{ name: 'Bru Fixture', path: allowed }]);
+      expect(fs.existsSync(path.join(other, 'x.yml'))).toBe(false);
+    } finally {
+      await scoped.close();
+    }
   });
 });

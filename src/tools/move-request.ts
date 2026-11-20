@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import { FORMAT_FILES, detectFormat, parseRequestFile } from '../core/readCollection.js';
+import { FORMAT_FILES, detectFormat, parseRequestFile, toPosixPath } from '../core/readCollection.js';
 import { nextSeq, serializeRequest } from '../core/requests.js';
 import {
   collectionPathSchema,
@@ -40,7 +40,8 @@ export const registerMoveRequestTool = (server: McpServer, { registry }: ToolCon
       },
       annotations: {
         readOnlyHint: false,
-        destructiveHint: false,
+        // A move (the default) deletes the original file.
+        destructiveHint: true,
         idempotentHint: false,
         openWorldHint: false
       }
@@ -77,8 +78,8 @@ export const registerMoveRequestTool = (server: McpServer, { registry }: ToolCon
       if (!destination) {
         return textResult({ error: `Can't place "${fileName}" in "${targetFolder}" of collection "${target.name}".` }, true);
       }
-      const from = path.relative(collection.path, source.path);
-      const to = path.relative(target.path, destination.path);
+      const from = toPosixPath(path.relative(collection.path, source.path));
+      const to = toPosixPath(path.relative(target.path, destination.path));
       if (destination.path === source.path) {
         return textResult({ error: `"${from}" is already in that folder.` }, true);
       }

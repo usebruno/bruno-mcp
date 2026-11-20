@@ -101,7 +101,7 @@ Then use `node /abs/path/to/dist/index.js` as the server command in any of the c
 | `add_test_script` | Append to (or `replace`) a request's `pre-request`, `post-response`, or `tests` script. 50 KB per block. |
 | `remove_script` | Clear one of a request's script blocks. |
 
-A collection is addressed by its **path**, not by an id: pass the `path` from `list_collections` as `collectionPath` to the other tools. If you already know where a collection lives, you can pass it directly without listing first. A request is addressed by its `relativePath` within the collection (e.g. `users/get-user.bru`).
+A collection is addressed by its **path**, not by an id: pass the `path` from `list_collections` as `collectionPath` to the other tools. If you already know where a collection lives, you can pass it directly without listing first, unless the server was started with `--collection` or `--workspace`: it then only works with those collections (and any it creates). A request is addressed by its `relativePath` within the collection (e.g. `users/get-user.bru`).
 
 ### What ends up in tool output
 
@@ -144,7 +144,7 @@ Options are passed as CLI flags when the client spawns the server (see the setup
 
 ```
 Usage: bruno-mcp [--collection <path>] [--workspace <path>]
-                 [--no-cwd-discovery] [--no-auto-discovery] [--verbose]
+                 [--no-cwd-discovery] [--no-auto-discovery] [--inherit-env] [--verbose]
 ```
 
 | Flag | Description |
@@ -153,6 +153,7 @@ Usage: bruno-mcp [--collection <path>] [--workspace <path>]
 | `--workspace <path>`, `-w` | Bruno workspace directory. Repeatable; expands to member collections. |
 | `--no-cwd-discovery` | Disable the CWD walk-up step. |
 | `--no-auto-discovery` | Disable the Bruno desktop preferences fallback. |
+| `--inherit-env` | Pass the server's whole environment, including variables exported in your shell startup files (`~/.zshrc`, `~/.bashrc`, …), to requests as `{{process.env.*}}`. Off by default: requests only see system variables (`PATH`, `HOME`, proxies, CA certificates, Vault address) plus the collection's own `.env` file, so an agent-written request can't read secrets from your shell. Turn it on if your environments resolve external secrets with credentials from the shell (`VAULT_TOKEN`, `AWS_*`). |
 | `--verbose` | Log debug info to stderr. |
 | `--help`, `-h` | Show help. |
 

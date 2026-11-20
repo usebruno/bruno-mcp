@@ -4,7 +4,18 @@ import path from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
+import { parseRequestFile, toPosixPath, type CollectionFormat } from '../core/readCollection.js';
 import { collectionPathSchema, errorText, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
+
+// In a .yml collection any .yml file (a CI workflow, a config) passes the path and extension checks, so a file is
+// only deleted when it parses as a Bruno request.
+const isBrunoRequest = (filePath: string, format: CollectionFormat): boolean => {
+  try {
+    return typeof parseRequestFile(filePath, format).type === 'string';
+  } catch (_) {
+    return false;
+  }
+};
 
 export const registerDeleteRequestTool = (server: McpServer, { registry }: ToolContext): void => {
   server.registerTool(
@@ -41,8 +52,12 @@ export const registerDeleteRequestTool = (server: McpServer, { registry }: ToolC
       const invalid: string[] = [];
       for (const requestPath of requestPaths) {
         const target = registry.resolveRequestTarget(collection.path, requestPath);
-        if (!target || (fs.existsSync(target.path) && !fs.statSync(target.path).isFile())) invalid.push(requestPath);
-        else targets.set(target.path, path.relative(collection.path, target.path));
+        const exists = target ? fs.existsSync(target.path) : false;
+        if (!target || (exists && (!fs.statSync(target.path).isFile() || !isBrunoRequest(target.path, target.format)))) {
+          invalid.push(requestPath);
+        } else {
+          targets.set(target.path, toPosixPath(path.relative(collection.path, target.path)));
+        }
       }
       if (invalid.length > 0) {
         return textResult(

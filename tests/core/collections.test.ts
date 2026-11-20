@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from '@jest/globals';
 
 import { CollectionRegistry } from '../../src/core/collections.js';
-import { BRU_COLLECTION, ISOLATED_CONFIG, makeTempDir, removeTempDirs, writeFiles } from '../helpers.js';
+import { BRU_COLLECTION, ISOLATED_CONFIG, YML_COLLECTION, makeTempDir, removeTempDirs, writeFiles } from '../helpers.js';
 
 const registry = new CollectionRegistry(ISOLATED_CONFIG);
 
@@ -80,6 +80,22 @@ describe('CollectionRegistry.environmentFiles', () => {
   it('returns an empty list for an unknown collection', () => {
     expect(registry.environmentFiles(makeTempDir())).toEqual([]);
   });
+
+  it('leaves out an environment file symlinked from outside the collection', () => {
+    const collection = writeFiles(makeTempDir(), { 'bruno.json': '{}', 'environments/local.bru': 'vars {\n  a: 1\n}\n' });
+    const outside = writeFiles(makeTempDir(), { 'outside.bru': 'vars {\n  b: 2\n}\n' });
+    fs.symlinkSync(path.join(outside, 'outside.bru'), path.join(collection, 'environments', 'linked.bru'));
+
+    expect(registry.environmentFiles(collection).map((env) => env.name)).toEqual(['local']);
+    expect(registry.environments(collection)).toEqual(['local']);
+  });
+
+  it('lists environments in an "Environments" folder on case-insensitive volumes', () => {
+    const collection = writeFiles(makeTempDir(), { 'bruno.json': '{}', 'Environments/local.bru': 'vars {\n  a: 1\n}\n' });
+    const caseInsensitive = fs.existsSync(path.join(collection, 'environments'));
+
+    expect(registry.environmentFiles(collection).map((env) => env.name)).toEqual(caseInsensitive ? ['local'] : []);
+  });
 });
 
 describe('CollectionRegistry.resolveRequestTarget', () => {
@@ -150,5 +166,42 @@ describe('CollectionRegistry.resolveFolderTarget', () => {
     fs.symlinkSync(makeTempDir(), path.join(collection, 'linked'));
 
     expect(registry.resolveFolderTarget(collection, 'linked')).toBeNull();
+  });
+});
+
+describe('CollectionRegistry scoped with --collection', () => {
+  const scoped = () => new CollectionRegistry({ ...ISOLATED_CONFIG, explicitCollections: [BRU_COLLECTION] });
+
+  it('resolves only the configured collections', () => {
+    const registry = scoped();
+    expect(registry.scoped).toBe(true);
+    expect(registry.resolve(BRU_COLLECTION)?.path).toBe(BRU_COLLECTION);
+    expect(registry.resolve(YML_COLLECTION)).toBeNull();
+    expect(registry.resolveRequestTarget(YML_COLLECTION, 'new.yml')).toBeNull();
+  });
+
+  it('also resolves collections it created', () => {
+    const registry = scoped();
+    const created = writeFiles(makeTempDir(), { 'bruno.json': '{}' });
+    registry.addCreated(created);
+    expect(registry.resolve(created)?.path).toBe(created);
+  });
+
+  it('resolves a configured collection reached through a symlink', () => {
+    const linked = path.join(makeTempDir(), 'linked');
+    fs.symlinkSync(BRU_COLLECTION, linked, 'dir');
+    expect(scoped().resolve(linked)?.path).toBe(BRU_COLLECTION);
+  });
+
+  it('knows its configured workspaces', () => {
+    const workspace = writeFiles(makeTempDir(), { 'workspace.yml': 'collections: []\n' });
+    const registry = new CollectionRegistry({ ...ISOLATED_CONFIG, explicitWorkspaces: [workspace] });
+    expect(registry.isConfiguredWorkspace(workspace)).toBe(true);
+    expect(registry.isConfiguredWorkspace(makeTempDir())).toBe(false);
+  });
+
+  it('resolves any collection when not scoped', () => {
+    expect(registry.scoped).toBe(false);
+    expect(registry.resolve(YML_COLLECTION)?.path).toBe(YML_COLLECTION);
   });
 });

@@ -215,7 +215,17 @@ const scanRequest = (filePath: string, format: CollectionFormat): ScannedRequest
   return scanViaParse(content, filePath, format);
 };
 
-const toPosixPath = (relativePath: string): string =>
+export const requestFileSeq = (filePath: string, format: CollectionFormat): number | undefined => {
+  const seq = scanRequest(filePath, format)?.seq;
+  return hasValidSeq(seq) ? seq : undefined;
+};
+
+export const folderSeq = (dir: string, format: CollectionFormat): number | undefined => {
+  const { seq } = readFolderMeta(dir, format);
+  return hasValidSeq(seq) ? seq : undefined;
+};
+
+export const toPosixPath = (relativePath: string): string =>
   path.sep === '/' ? relativePath : relativePath.split(path.sep).join('/');
 
 export const readCollectionIndex = (collectionPath: string): RequestInfo[] => {

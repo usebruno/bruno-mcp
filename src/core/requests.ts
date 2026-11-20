@@ -2,7 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { stringifyRequest } from '@usebruno/filestore';
 
-import { SKIPPED_DIRS, isInEnvironmentsDir, isRequestFile, type CollectionFormat } from './readCollection.js';
+import {
+  SKIPPED_DIRS,
+  folderSeq,
+  isInEnvironmentsDir,
+  isRequestFile,
+  requestFileSeq,
+  type CollectionFormat
+} from './readCollection.js';
 
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS', 'TRACE'] as const;
 export const HTTP_REQUEST_TYPES = ['http-request', 'graphql-request'];
@@ -135,15 +142,24 @@ export const applyRequestEdit = (item: any, edit: RequestEdit): any => {
 
 export const serializeRequest = (item: any, format: CollectionFormat): string => stringifyRequest(item, { format });
 
-// The app numbers a new item after every folder and request already beside it.
+// The app numbers a new item after every folder and request already beside it. Taking the highest seq as well as
+// the count keeps the new item last after a deletion has left a gap (seq 2 alone, with seq 1 deleted).
 export const nextSeq = (dir: string, collectionPath: string, format: CollectionFormat): number => {
   if (!fs.existsSync(dir)) return 1;
-  const siblings = fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => {
+  let count = 0;
+  let highest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const entryPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) return !SKIPPED_DIRS.has(entry.name) && !isInEnvironmentsDir(collectionPath, entryPath);
-    return isRequestFile(collectionPath, entryPath, format);
-  });
-  return siblings.length + 1;
+    if (entry.isDirectory()) {
+      if (SKIPPED_DIRS.has(entry.name) || isInEnvironmentsDir(collectionPath, entryPath)) continue;
+      highest = Math.max(highest, folderSeq(entryPath, format) ?? 0);
+    } else {
+      if (!isRequestFile(collectionPath, entryPath, format)) continue;
+      highest = Math.max(highest, requestFileSeq(entryPath, format) ?? 0);
+    }
+    count++;
+  }
+  return Math.max(count, highest) + 1;
 };
 
 export const SCRIPT_TYPES = ['pre-request', 'post-response', 'tests'] as const;

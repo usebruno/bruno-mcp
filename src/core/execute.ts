@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 
 import * as log from '../log.js';
 import type { CollectionRunOptions, VariableOverrides } from '../types.js';
-import { detectFormat, type CollectionFormat } from './readCollection.js';
+import { detectFormat, toPosixPath, type CollectionFormat } from './readCollection.js';
 
 const require = createRequire(import.meta.url);
 const BRU_BIN: string = require.resolve('@usebruno/cli/bin/bru.js');
@@ -175,9 +175,12 @@ const failedChecksOf = (entry: any) =>
     }));
 
 // The CLI strips `.bru` from report paths; restore it so they can be passed to get_request/execute_request.
+// bru reports native paths (backslashes on Windows); return them with "/" like list_requests does.
 const requestPathOf = (reportedPath: string | null, format: CollectionFormat | null): string | null => {
-  if (!reportedPath || format !== 'bru' || path.extname(reportedPath) === '.bru') return reportedPath;
-  return `${reportedPath}.bru`;
+  if (!reportedPath) return reportedPath;
+  const posix = toPosixPath(reportedPath);
+  if (format !== 'bru' || path.extname(posix) === '.bru') return posix;
+  return `${posix}.bru`;
 };
 
 // Same pass/fail rules as the CLI's runner summary.
@@ -258,6 +261,45 @@ export const formatRunResult = (
   };
 };
 
+// `bru` hands its own environment to requests and scripts as {{process.env.*}} / bru.getProcessEnv(). Passing it
+// this server's whole environment would let an agent-authored request send the user's shell secrets anywhere, so
+// it only gets what it needs to run: system paths, locale, proxies, CA certificates and non-secret client settings.
+// Credentials (VAULT_TOKEN, AWS_*, ...) are left out. A collection's own `.env` file is still loaded by `bru`
+// itself. `--inherit-env` restores the full environment.
+const PASSTHROUGH_ENV = new Set(
+  [
+    'PATH', 'PATHEXT', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'USER', 'USERNAME', 'LOGNAME', 'SHELL',
+    'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM',
+    'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'OS',
+    'NUMBER_OF_PROCESSORS', 'PROCESSOR_ARCHITECTURE',
+    'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_RUNTIME_DIR',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'GRPC_PROXY', 'NO_GRPC_PROXY',
+    'NODE_EXTRA_CA_CERTS', 'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_OPTIONS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+    'REQUESTS_CA_BUNDLE', 'GRPC_DEFAULT_SSL_ROOTS_FILE_PATH', 'AZURE_CLI_DISABLE_CONNECTION_VERIFICATION',
+    'VAULT_ADDR', 'VAULT_NAMESPACE'
+  ]
+);
+
+// On macOS and Linux `bru` starts the user's login shell at startup and copies in every variable it doesn't have
+// yet, which would bring back everything exported in ~/.zshrc or ~/.bashrc. This preload turns that off by
+// replacing @usebruno/requests' initializeShellEnv before `bru` loads it. A data: URL needs no file next to dist/.
+const NO_SHELL_ENV_PRELOAD = `data:text/javascript,${encodeURIComponent(
+  "import { createRequire } from 'node:module';" +
+    `createRequire(${JSON.stringify(BRU_BIN)})('@usebruno/requests').initializeShellEnv = async () => ({});`
+)}`;
+
+let inheritEnv = false;
+
+export const setInheritEnv = (on: boolean): void => {
+  inheritEnv = on;
+};
+
+// Windows env names are case-insensitive, and proxies are often set in lower case, so match ignoring case.
+export const bruEnv = (env: NodeJS.ProcessEnv = process.env, inherit = inheritEnv): NodeJS.ProcessEnv => {
+  if (inherit) return { ...env };
+  return Object.fromEntries(Object.entries(env).filter(([key]) => PASSTHROUGH_ENV.has(key.toUpperCase())));
+};
+
 interface RunBruArgs {
   collectionPath: string;
   paths: string[];
@@ -282,8 +324,10 @@ const runBru = async ({
   log.debug(`spawn: node ${BRU_BIN} ${args.join(' ')} (cwd=${collectionPath})`);
 
   const stderrChunks: Buffer[] = [];
-  const child = spawn(process.execPath, [BRU_BIN, ...args], {
+  const preload = inheritEnv ? [] : ['--import', NO_SHELL_ENV_PRELOAD];
+  const child = spawn(process.execPath, [...preload, BRU_BIN, ...args], {
     cwd: collectionPath,
+    env: bruEnv(),
     stdio: ['ignore', 'ignore', 'pipe']
   });
 

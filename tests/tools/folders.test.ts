@@ -59,9 +59,9 @@ describe('list_folders', () => {
           children: [
             {
               name: 'admin',
-              path: path.join('users', 'admin'),
+              path: 'users/admin',
               requestCount: 2,
-              children: [{ name: 'audit', path: path.join('users', 'admin', 'audit'), requestCount: 1, children: [] }]
+              children: [{ name: 'audit', path: 'users/admin/audit', requestCount: 1, children: [] }]
             }
           ]
         }

@@ -1,6 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { listEnvironmentFiles } from '../core/environments.js';
 import { detectFormat, directorySizeBytes, readCollectionIndex, readFolderTree, type FolderNode } from '../core/readCollection.js';
 import { HTTP_REQUEST_TYPES } from '../core/requests.js';
 import { collectionPathSchema, textResult, unknownCollectionMessage, type ToolContext } from './helpers.js';
@@ -47,7 +46,7 @@ export const registerGetCollectionStatsTool = (server: McpServer, { registry }: 
         byMethod: tally(methodBearing.map((r) => r.method)),
         byType: tally(requests.map((r) => r.type)),
         folderCount: countFolders(readFolderTree(collection.path)),
-        environmentCount: listEnvironmentFiles(collection.path).length,
+        environmentCount: registry.environmentFiles(collection.path).length,
         sizeBytes: directorySizeBytes(collection.path)
       });
     }

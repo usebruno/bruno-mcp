@@ -10,6 +10,7 @@ import {
   findEnvironment,
   textResult,
   unknownCollectionMessage,
+  withFileLock,
   type ToolContext
 } from './helpers.js';
 
@@ -56,53 +57,55 @@ export const registerSetEnvironmentVariableTool = (server: McpServer, { registry
       if ('error' in found) return found.error;
       const { environment } = found;
 
-      try {
-        const current = (await readEnvironmentVariables(environment)).find((v) => v.name === name);
-        if (current?.secret && !overwriteSecret) {
+      return withFileLock(environment.path, async () => {
+        try {
+          const current = (await readEnvironmentVariables(environment)).find((v) => v.name === name);
+          if (current?.secret && !overwriteSecret) {
+            return textResult(
+              {
+                error: `"${name}" is a secret variable in the "${environment.name}" environment.`,
+                hint: 'Pass overwriteSecret: true to change it, or pass the value in "variables" to execute_request or run_collection to use it for one run.'
+              },
+              true
+            );
+          }
+
+          const update = {
+            name,
+            value: String(value),
+            enabled: enabled ?? current?.enabled ?? true,
+            secret: secret ?? current?.secret ?? false
+          };
+          const before = fs.readFileSync(environment.path, 'utf8');
+          const content = await setEnvironmentVariable(environment, update);
+          const wrote = content !== before;
+          if (wrote) fs.writeFileSync(environment.path, content);
+
+          return textResult({
+            ok: true,
+            environment: environment.name,
+            name,
+            wrote,
+            created: !current,
+            enabled: update.enabled,
+            secret: update.secret,
+            ...(update.secret
+              ? {
+                  valueWritten: false,
+                  hint: 'Bruno keeps secret values out of collection files. Set the value in the Bruno app, or pass it in "variables" when running.'
+                }
+              : {})
+          });
+        } catch (err: any) {
           return textResult(
             {
-              error: `"${name}" is a secret variable in the "${environment.name}" environment.`,
-              hint: 'Pass overwriteSecret: true to change it, or pass the value in "variables" to execute_request or run_collection to use it for one run.'
+              error: `Could not update environment "${environment.name}": ${errorText(err)}`,
+              hint: 'The environment file may be corrupted or invalid.'
             },
             true
           );
         }
-
-        const update = {
-          name,
-          value: String(value),
-          enabled: enabled ?? current?.enabled ?? true,
-          secret: secret ?? current?.secret ?? false
-        };
-        const before = fs.readFileSync(environment.path, 'utf8');
-        const content = await setEnvironmentVariable(environment, update);
-        const wrote = content !== before;
-        if (wrote) fs.writeFileSync(environment.path, content);
-
-        return textResult({
-          ok: true,
-          environment: environment.name,
-          name,
-          wrote,
-          created: !current,
-          enabled: update.enabled,
-          secret: update.secret,
-          ...(update.secret
-            ? {
-                valueWritten: false,
-                hint: 'Bruno keeps secret values out of collection files. Set the value in the Bruno app, or pass it in "variables" when running.'
-              }
-            : {})
-        });
-      } catch (err: any) {
-        return textResult(
-          {
-            error: `Could not update environment "${environment.name}": ${errorText(err)}`,
-            hint: 'The environment file may be corrupted or invalid.'
-          },
-          true
-        );
-      }
+      });
     }
   );
 };

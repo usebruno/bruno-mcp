@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { formatRunResult } from '../../src/core/execute.js';
+import { bruEnv, formatRunResult } from '../../src/core/execute.js';
 
 const rawRun = (report: unknown, exitCode = 0, stderr = '') => ({
   exitCode,
@@ -193,5 +193,18 @@ describe('formatRunResult', () => {
     expect(result.error).toBe('Path not found: /x/nope.bru');
     expect(result.requests).toEqual([]);
     expect(result.summary).toMatchObject({ iterations: 0, total: 0 });
+  });
+});
+
+describe('bruEnv', () => {
+  const kept = { PATH: '/bin', Path: 'C:\\Windows', https_proxy: 'http://proxy', SystemRoot: 'C:\\Windows', node_extra_ca_certs: '/ca.pem', VAULT_ADDR: 'https://vault' };
+  const env = { ...kept, GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 'k', VAULT_TOKEN: 'v' };
+
+  it('keeps only system, proxy, certificate and non-secret client variables, in any letter case', () => {
+    expect(bruEnv(env, false)).toEqual(kept);
+  });
+
+  it('keeps everything when inheriting', () => {
+    expect(bruEnv(env, true)).toEqual(env);
   });
 });
