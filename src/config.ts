@@ -48,6 +48,7 @@ export const parseArgs = (argv: string[]): ParsedArgs => {
       describe: 'Log debug info to stderr',
       default: false
     })
+    .epilogue('To add this server to Claude Code, Cursor, VS Code, Codex or Claude Desktop, run `npx @usebruno/mcp setup`.')
     .help()
     .alias('h', 'help')
     .parseSync();
